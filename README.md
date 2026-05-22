@@ -1,7 +1,7 @@
 # ⬡ orcli — OpenRouter Agent CLI
 
-[![Go Version](https://img.shields.io/github/go-mod/go-version/yourusername/orcli?color=00ADD8)](https://go.dev)
-[![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/xmavexy-ship-it/orcli-openrouter-client?color=00ADD8)](https://go.dev)
+[![License](https://img.shields.io/github/license/xmavexy-ship-it/orcli-openrouter-client?color=blue)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-linux%20%7C%20macos-lightgrey)]()
 [![Blazing Fast](https://img.shields.io/badge/speed-blazing__fast-orange.svg)]()
 
