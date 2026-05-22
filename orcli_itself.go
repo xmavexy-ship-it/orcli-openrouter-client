@@ -114,12 +114,12 @@ type AssistantMessage struct {
 // ─── Tool definitions ────────────────────────────────────────────────────────
 
 type ToolParam struct {
-	Type        string            `json:"type"`
-	Description string            `json:"description,omitempty"`
-	Enum        []string          `json:"enum,omitempty"`
+	Type        string               `json:"type"`
+	Description string               `json:"description,omitempty"`
+	Enum        []string             `json:"enum,omitempty"`
 	Properties  map[string]ToolParam `json:"properties,omitempty"`
-	Required    []string          `json:"required,omitempty"`
-	Items       *ToolParam        `json:"items,omitempty"`
+	Required    []string             `json:"required,omitempty"`
+	Items       *ToolParam           `json:"items,omitempty"`
 }
 
 type Tool struct {
@@ -268,7 +268,6 @@ func getTools() []Tool {
 
 // ─── Tool execution ───────────────────────────────────────────────────────────
 
-// Dangerous commands that always require confirmation
 var dangerousPatterns = []string{
 	"rm -rf", "rm -r", "mkfs", "dd if=", ":(){:|:&};:", "chmod -R 777",
 	"curl | sh", "wget | sh", "curl | bash", "wget | bash",
@@ -324,7 +323,6 @@ func executeTool(name string, argsJSON string, autoApprove bool) string {
 		blue.Printf("  ✏️  write_file: ")
 		white.Println(path)
 		if !autoApprove {
-			// Show preview
 			lines := strings.Split(content, "\n")
 			preview := lines
 			if len(preview) > 5 {
@@ -340,7 +338,6 @@ func executeTool(name string, argsJSON string, autoApprove bool) string {
 				return "cancelled by user"
 			}
 		}
-		// Create dirs if needed
 		os.MkdirAll(filepath.Dir(path), 0755)
 		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
 			return fmt.Sprintf("error: %v", err)
@@ -414,7 +411,6 @@ func executeTool(name string, argsJSON string, autoApprove bool) string {
 		if result == "" {
 			result = "(no output)"
 		}
-		// Print output
 		for _, line := range strings.Split(strings.TrimRight(result, "\n"), "\n") {
 			dim.Printf("     %s\n", line)
 		}
@@ -466,19 +462,20 @@ type ChatRequest struct {
 	Tools     []Tool      `json:"tools,omitempty"`
 }
 
-type NonStreamResponse struct {
-	Choices []struct {
-		Message AssistantMessage `json:"message"`
-	} `json:"choices"`
-	Error *struct {
-		Message string `json:"message"`
-	} `json:"error"`
+type StreamToolCall struct {
+	Index    int    `json:"index"`
+	ID       string `json:"id"`
+	Type     string `json:"type"`
+	Function struct {
+		Name      string `json:"name"`
+		Arguments string `json:"arguments"`
+	} `json:"function"`
 }
 
 type StreamChoice struct {
 	Delta struct {
-		Content   string     `json:"content"`
-		ToolCalls []ToolCall `json:"tool_calls"`
+		Content   string           `json:"content"`
+		ToolCalls []StreamToolCall `json:"tool_calls"`
 	} `json:"delta"`
 	FinishReason *string `json:"finish_reason"`
 }
@@ -487,9 +484,6 @@ type StreamChunk struct {
 	Choices []StreamChoice `json:"choices"`
 }
 
-// callAPI sends messages and returns the assistant's response.
-// If the model wants to call tools, it returns them without streaming.
-// If it's a regular text response, it streams to stdout.
 func callAPI(cfg Config, messages []interface{}) (AssistantMessage, error) {
 	tools := getTools()
 
@@ -527,9 +521,7 @@ func callAPI(cfg Config, messages []interface{}) (AssistantMessage, error) {
 		return AssistantMessage{}, fmt.Errorf("API error %d: %s", resp.StatusCode, string(b))
 	}
 
-	// Stream and collect
 	var fullText strings.Builder
-	// tool_calls accumulate across chunks
 	toolCallsMap := map[int]*ToolCall{}
 
 	scanner := bufio.NewScanner(resp.Body)
@@ -557,31 +549,21 @@ func callAPI(cfg Config, messages []interface{}) (AssistantMessage, error) {
 
 		delta := chunk.Choices[0].Delta
 
-		// Accumulate tool calls
 		for _, tc := range delta.ToolCalls {
-			if _, ok := toolCallsMap[tc.Index]; !ok {
-				// Use Index field if available, else use loop index
-				idx := 0
-				if tc.Index != 0 {
-					idx = tc.Index
-				} else {
-					idx = len(toolCallsMap)
-				}
+			idx := tc.Index
+			if _, ok := toolCallsMap[idx]; !ok {
 				toolCallsMap[idx] = &ToolCall{
 					ID:   tc.ID,
 					Type: "function",
-					Function: struct {
-						Name      string `json:"name"`
-						Arguments string `json:"arguments"`
-					}{
-						Name: tc.Function.Name,
-					},
 				}
+				toolCallsMap[idx].Function.Name = tc.Function.Name
 			}
-			toolCallsMap[len(toolCallsMap)-1].Function.Arguments += tc.Function.Arguments
+			if tc.ID != "" {
+				toolCallsMap[idx].ID = tc.ID
+			}
+			toolCallsMap[idx].Function.Arguments += tc.Function.Arguments
 		}
 
-		// Stream text
 		if delta.Content != "" {
 			if !printedHeader {
 				fmt.Println()
@@ -605,13 +587,11 @@ func callAPI(cfg Config, messages []interface{}) (AssistantMessage, error) {
 		fmt.Println("\n")
 	}
 
-	// Build result
 	result := AssistantMessage{
 		Role:    "assistant",
 		Content: fullText.String(),
 	}
 
-	// Collect tool calls
 	for i := 0; i < len(toolCallsMap); i++ {
 		if tc, ok := toolCallsMap[i]; ok {
 			result.ToolCalls = append(result.ToolCalls, *tc)
@@ -631,15 +611,12 @@ func runAgentLoop(cfg Config, messages []interface{}) []interface{} {
 			return messages
 		}
 
-		// Add assistant message to history
 		messages = append(messages, response)
 
-		// No tool calls → done
 		if len(response.ToolCalls) == 0 {
 			return messages
 		}
 
-		// Execute each tool call
 		fmt.Println()
 		cyan.Println("  ┄ tool calls ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄")
 
@@ -647,7 +624,6 @@ func runAgentLoop(cfg Config, messages []interface{}) []interface{} {
 			fmt.Println()
 			result := executeTool(tc.Function.Name, tc.Function.Arguments, cfg.AutoApprove)
 
-			// Add tool result message
 			messages = append(messages, map[string]interface{}{
 				"role":         "tool",
 				"tool_call_id": tc.ID,
@@ -657,8 +633,6 @@ func runAgentLoop(cfg Config, messages []interface{}) []interface{} {
 
 		cyan.Println("\n  ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄")
 		fmt.Println()
-
-		// Continue loop — model will respond to tool results
 	}
 }
 
@@ -768,14 +742,12 @@ Think step by step, use multiple tools when needed, explain what you're doing.`,
 		map[string]interface{}{"role": "system", "content": systemPrompt},
 	}
 
-	// One-shot mode
 	if oneShot != "" {
 		messages = append(messages, map[string]interface{}{"role": "user", "content": oneShot})
 		runAgentLoop(cfg, messages)
 		return
 	}
 
-	// Interactive
 	printBanner()
 	green.Printf("  Model:       ")
 	fmt.Println(cfg.Model)
@@ -792,7 +764,6 @@ Think step by step, use multiple tools when needed, explain what you're doing.`,
 	reader := bufio.NewReader(os.Stdin)
 
 	for {
-		// Prompt
 		cwd, _ := os.Getwd()
 		home, _ := os.UserHomeDir()
 		cwdDisplay := strings.Replace(cwd, home, "~", 1)
@@ -845,25 +816,45 @@ Think step by step, use multiple tools when needed, explain what you're doing.`,
 			green.Println("  ✓ Conversation cleared\n")
 
 		case input == "/history":
+			if len(messages) == 0 {
+				dim.Println("  (empty)")
+			}
 			for i, m := range messages {
-				if mm, ok := m.(map[string]interface{}); ok {
-					role := fmt.Sprintf("%v", mm["role"])
-					content := fmt.Sprintf("%v", mm["content"])
-					if len(content) > 60 {
-						content = content[:60] + "…"
+				var role, content string
+
+				switch msg := m.(type) {
+				case AssistantMessage:
+					role = msg.Role
+					content = msg.Content
+					if content == "" && len(msg.ToolCalls) > 0 {
+						var tools []string
+						for _, tc := range msg.ToolCalls {
+							tools = append(tools, tc.Function.Name)
+						}
+						content = fmt.Sprintf("Called tools: [%s]", strings.Join(tools, ", "))
 					}
-					switch role {
-					case "system":
-						yellow.Printf("  [%d] system:    ", i)
-					case "user":
-						cyan.Printf("  [%d] user:      ", i)
-					case "assistant":
-						magenta.Printf("  [%d] assistant: ", i)
-					case "tool":
-						blue.Printf("  [%d] tool:      ", i)
-					}
-					dim.Println(content)
+				case map[string]interface{}:
+					role = fmt.Sprintf("%v", msg["role"])
+					content = fmt.Sprintf("%v", msg["content"])
+				default:
+					continue
 				}
+
+				if len(content) > 80 {
+					content = content[:80] + "…"
+				}
+
+				switch role {
+				case "system":
+					yellow.Printf("  [%d] system:    ", i)
+				case "user":
+					cyan.Printf("  [%d] user:      ", i)
+				case "assistant":
+					magenta.Printf("  [%d] assistant: ", i)
+				case "tool":
+					blue.Printf("  [%d] tool:      ", i)
+				}
+				dim.Println(content)
 			}
 			fmt.Println()
 
@@ -883,7 +874,7 @@ Think step by step, use multiple tools when needed, explain what you're doing.`,
 			fmt.Printf("  auto_approve: %v\n", cfg.AutoApprove)
 			keyPreview := "not set"
 			if cfg.APIKey != "" {
-				keyPreview = cfg.APIKey[:min(8, len(cfg.APIKey))] + "..."
+				keyPreview = cfg.APIKey[:customMin(8, len(cfg.APIKey))] + "..."
 			}
 			fmt.Printf("  api_key:      %s\n\n", keyPreview)
 
@@ -916,29 +907,11 @@ Think step by step, use multiple tools when needed, explain what you're doing.`,
 	}
 }
 
-func min(a, b int) int {
+func customMin(a, b int) int {
 	if a < b {
 		return a
 	}
 	return b
-}
-
-// ─── ToolCall index field ─────────────────────────────────────────────────────
-// We need Index on ToolCall for streaming accumulation
-
-func init() {
-	// patch: ToolCall needs Index for streaming
-}
-
-// Override ToolCall to add Index (for streaming delta accumulation)
-type ToolCallDelta struct {
-	Index int    `json:"index"`
-	ID    string `json:"id"`
-	Type  string `json:"type"`
-	Function struct {
-		Name      string `json:"name"`
-		Arguments string `json:"arguments"`
-	} `json:"function"`
 }
 
 // ─── Cobra CLI ────────────────────────────────────────────────────────────────
