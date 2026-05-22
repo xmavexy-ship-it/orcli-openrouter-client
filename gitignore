@@ -1,0 +1,14 @@
+# Binary
+orcli
+orcli-linux
+orcli-arm64
+orcli-darwin
+
+# Config with API keys — never commit!
+.orcli.json
+.orcli_history.json
+
+# Go
+*.test
+*.out
+vendor/
