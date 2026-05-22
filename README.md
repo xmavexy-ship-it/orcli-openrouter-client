@@ -49,7 +49,7 @@
 ### Автоматическая установка (Linux / macOS)
 
 ```bash
-git clone https://github.com/yourusername/orcli
+git clone https://github.com/xmavexy-ship-it/orcli-openrouter-client
 cd orcli
 chmod +x install.sh
 ./install.sh
@@ -67,7 +67,7 @@ chmod +x install.sh
 
 ```bash
 # Нужен Go 1.22+
-git clone https://github.com/yourusername/orcli
+git clone https://github.com/xmavexy-ship-it/orcli-openrouter-client
 cd orcli
 go mod tidy
 go build -ldflags="-s -w" -o orcli .
